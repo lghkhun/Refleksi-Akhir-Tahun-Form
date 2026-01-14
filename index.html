@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Refleksi Akhir Tahun: Lambang & Lonita</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <!-- Import Map for Google GenAI SDK usage in Browser -->
+    <script type="importmap">
+    {
+      "imports": {
+        "@google/genai": "https://esm.run/@google/genai"
+      }
+    }
+    </script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        indigo: { 50: '#eef2ff', 100: '#e0e7ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' },
+                        slate: { 50: '#f8fafc', 800: '#1e293b', 900: '#0f172a' }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Force light color scheme to prevent dark mode overrides on form controls */
+        :root { color-scheme: light; }
+        
+        body { font-family: 'Inter', sans-serif; }
+        .fade-in { animation: fadeIn 0.4s ease-out forwards; opacity: 0; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Custom scrollbar for dashboard lists */
+        .scroller::-webkit-scrollbar { width: 6px; }
+        .scroller::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 4px; }
+        .scroller::-webkit-scrollbar-track { background-color: #f1f5f9; }
+        
+        /* Markdown-like simple styling for AI response */
+        .ai-content h3 { font-weight: 700; margin-top: 1.5rem; margin-bottom: 0.75rem; color: #1e293b; font-size: 1.1rem; }
+        .ai-content ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
+        .ai-content li { margin-bottom: 0.5rem; }
+        .ai-content p { margin-bottom: 0.75rem; line-height: 1.7; text-align: justify; }
+        .ai-content strong { color: #0f766e; } /* Teal-700 for emphasis */
+        .ai-content blockquote { border-left: 4px solid #cbd5e1; padding-left: 1rem; font-style: italic; color: #64748b; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- APP CONTAINER -->
+    <div id="app" class="flex-grow flex flex-col items-center justify-center p-4 w-full">
+        <!-- Content injected by JS -->
+    </div>
+
+    <!-- ADMIN PIN OVERLAY (Hidden by default) -->
+    <div id="admin-overlay" class="fixed inset-0 bg-slate-900 z-50 flex items-center justify-center hidden">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-sm w-full text-center fade-in" style="animation-delay: 0.1s; opacity: 1;">
+            <div class="mb-4 text-4xl">🔒</div>
+            <h2 class="text-2xl font-bold mb-2 text-slate-800">Admin Dashboard</h2>
+            <p class="mb-6 text-slate-500 text-sm">Masukkan Kode Akses Keluarga.</p>
+            <input type="password" id="admin-pin" class="w-full text-center text-xl border-2 border-slate-200 rounded-lg p-3 mb-4 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all uppercase" placeholder="KODE AKSES">
+            <button onclick="checkPin()" class="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">Buka Dashboard</button>
+            <p id="pin-error" class="text-red-500 mt-3 text-sm hidden font-medium">Kode Salah! Akses Ditolak.</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { GoogleGenAI } from "@google/genai";
+
+        // ================= CONFIGURATION =================
+        const SUPABASE_URL = 'https://xeusihhkyqttjhsunrvh.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_P66mU_qwhbDJ7j8rp47WWQ_1z8iym2G';
+        
+        // Initialize Gemini AI
+        const GEMINI_API_KEY = 'AIzaSyCa3TfEeZTmQUy-FPnknyc1KvfhCHzUpWo';
+        let ai;
+        
+        try {
+             ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        } catch (e) {
+            console.warn("AI Init warning:", e);
+        }
+
+        let supabase;
+        try {
+            supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        } catch (e) {
+            console.error("Supabase init failed. Make sure CDN is loaded and keys are set.");
+        }
+
+        // ================= DATA STRUCTURE =================
+        const SURVEY_DATA = {
+            personal: [
+                { id: 'relation', label: 'Hubunganmu dengan [NAMA]?', type: 'select', options: ['Keluarga', 'Sahabat', 'Teman Kerja', 'Kenalan'] },
+                { id: 'depth', label: 'Seberapa dalam kamu mengenal [NAMA]?', type: 'slider', min: 1, max: 5 },
+                { id: 'traits', label: '3 Kata Sifat yang menggambarkan [NAMA]?', type: 'text', placeholder: 'Cth: Cerdas, Humoris, Tegas' },
+                { id: 'traffic_stop', label: '🛑 STOP: Kebiasaan buruk yang harus dihentikan?', type: 'textarea' },
+                { id: 'traffic_start', label: '🟢 START: Hal baru yang sebaiknya dimulai?', type: 'textarea' },
+                { id: 'traffic_continue', label: '🟡 CONTINUE: Sifat baik yang wajib dipertahankan?', type: 'textarea' },
+                { id: 'response_pressure', label: 'Respon saat ada masalah/tekanan?', type: 'select', options: ['Tenang', 'Panik', 'Menghindar', 'Marah'] },
+                { id: 'listening_style', label: 'Gaya Mendengarkan?', type: 'select', options: ['Pendengar baik', 'Suka memotong', 'Pasif', 'Self-centered'] },
+                { id: 'energy', label: 'Energi Kehadiran (Battery)?', type: 'select', options: ['Menguras Energi', 'Biasa Saja', 'Me-recharge/Menyenangkan'] },
+                { id: 'professionalism', label: 'Profesionalisme & Keandalan?', type: 'slider', min: 1, max: 5, optional: true, note: 'Geser ke kiri mentok (0) jika ingin skip' },
+                { id: 'blindspot_work', label: 'Blind Spot dalam pekerjaan? (Optional)', type: 'textarea', optional: true }
+            ],
+            sensitive: [
+                { id: 'lifestyle', label: 'Persepsi Gaya Hidup?', type: 'select', options: ['Sederhana/Low Profile', 'Wajar', 'Berlebihan/Pamer'] },
+                { id: 'financial', label: 'Kedermawanan/Keuangan?', type: 'select', options: ['Royal/Dermawan', 'Fair/Adil', 'Perhitungan/Pelit'] },
+                { id: 'religious', label: 'Konsistensi Nilai Agama & Perilaku?', type: 'select', options: ['Sangat Konsisten', 'Cukup', 'Kurang/Pencitraan'] }
+            ],
+            family: [
+                { id: 'couple_vibes', label: 'Vibes Pasangan Lambang & Lonita?', type: 'textarea' },
+                { id: 'parenting', label: 'Jika pernah melihat kami dengan anak, bagaimana gaya parenting kami?', type: 'textarea' },
+                { id: 'wishes', label: 'Harapan untuk keluarga kami di tahun depan?', type: 'textarea' }
+            ]
+        };
+
+        // ================= STATE =================
+        let state = {
+            target: null, // 'Lambang', 'Lonita', 'Family'
+            answers: {},
+            stepQueue: [] // Array of steps to render
+        };
+
+        // ================= DOM ELEMENTS =================
+        const app = document.getElementById('app');
+
+        // ================= INITIALIZATION =================
+        window.addEventListener('load', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('mode') === 'admin') {
+                document.getElementById('admin-overlay').classList.remove('hidden');
+            } else {
+                renderLanding();
+            }
+        });
+
+        // ================= ADMIN LOGIC =================
+        window.checkPin = async () => {
+            const pinInput = document.getElementById('admin-pin');
+            const pin = pinInput.value;
+            
+            // Check for correct PIN (Case sensitive or insensitive depending on preference, here strict)
+            if (pin === '3LFAMILY') {
+                document.getElementById('admin-overlay').classList.add('hidden');
+                await renderDashboard();
+            } else {
+                const err = document.getElementById('pin-error');
+                err.classList.remove('hidden');
+                err.classList.add('animate-bounce');
+                pinInput.value = ''; // Clear input on error
+                pinInput.focus();
+                setTimeout(() => err.classList.remove('animate-bounce'), 1000);
+            }
+        };
+
+        // ================= USER FLOW: LANDING =================
+        function renderLanding() {
+            app.innerHTML = `
+                <div class="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center fade-in border border-slate-100" style="animation-delay: 0s">
+                    <div class="mb-6 inline-block">
+                        <span class="bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-full text-xs font-bold tracking-widest uppercase border border-indigo-100">Annual Survey</span>
+                    </div>
+                    <h1 class="text-3xl font-extrabold text-slate-900 mb-3 tracking-tight">Refleksi Akhir Tahun</h1>
+                    <p class="text-slate-500 mb-8 leading-relaxed">Bantu Lambang & Lonita mengevaluasi diri untuk menjadi pribadi yang lebih baik di tahun 2025.</p>
+                    
+                    <h3 class="font-bold text-slate-800 mb-4 text-sm uppercase tracking-wide">Siapa yang ingin kamu nilai?</h3>
+                    
+                    <div class="space-y-3">
+                        <button onclick="startSurvey('Lambang')" class="group w-full flex items-center justify-between bg-white border-2 border-slate-100 hover:border-indigo-500 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 font-semibold py-4 px-6 rounded-xl transition-all duration-200">
+                            <span>Hanya Lambang</span>
+                            <span class="text-2xl group-hover:scale-110 transition-transform">👨🏻</span>
+                        </button>
+                        <button onclick="startSurvey('Lonita')" class="group w-full flex items-center justify-between bg-white border-2 border-slate-100 hover:border-rose-400 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-semibold py-4 px-6 rounded-xl transition-all duration-200">
+                            <span>Hanya Lonita</span>
+                            <span class="text-2xl group-hover:scale-110 transition-transform">👩🏻</span>
+                        </button>
+                        <button onclick="startSurvey('Family')" class="group w-full flex items-center justify-between bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 px-6 rounded-xl shadow-lg shadow-indigo-200 hover:shadow-indigo-300 transition-all duration-200 transform hover:-translate-y-0.5">
+                            <span>Keduanya (Keluarga)</span>
+                            <span class="text-2xl group-hover:scale-110 transition-transform">👨‍👩‍👧</span>
+                        </button>
+                    </div>
+                    <div class="mt-8 text-xs text-slate-400">Identitas responden dirahasiakan (Anonim)</div>
+                </div>
+            `;
+        }
+
+        window.startSurvey = (target) => {
+            state.target = target;
+            state.answers = {};
+            
+            // Build Queue
+            state.stepQueue = [];
+            if (target === 'Lambang' || target === 'Family') state.stepQueue.push('Lambang');
+            if (target === 'Lonita' || target === 'Family') state.stepQueue.push('Lonita');
+            if (target === 'Family') state.stepQueue.push('FamilySection');
+            
+            renderNextStep();
+        };
+
+        function renderNextStep() {
+            if (state.stepQueue.length === 0) {
+                submitData();
+                return;
+            }
+
+            const currentContext = state.stepQueue.shift(); // Remove first item
+            
+            if (currentContext === 'FamilySection') {
+                renderFamilyForm();
+            } else {
+                renderPersonForm(currentContext);
+            }
+        }
+
+        // ================= USER FLOW: FORMS =================
+        function renderPersonForm(name) {
+            const isLambang = name === 'Lambang';
+            const themeColor = isLambang ? 'indigo' : 'rose'; // Tailwind colors
+            const headerColor = isLambang ? 'bg-indigo-600' : 'bg-rose-500';
+            const lightColor = isLambang ? 'bg-indigo-50' : 'bg-rose-50';
+            const ringColor = isLambang ? 'focus:ring-indigo-500' : 'focus:ring-rose-500';
+
+            const questions = [...SURVEY_DATA.personal, ...SURVEY_DATA.sensitive];
+            
+            let formHTML = `
+                <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full overflow-hidden fade-in" style="animation-delay: 0s">
+                    <div class="${headerColor} p-8 text-white relative overflow-hidden">
+                        <div class="relative z-10">
+                            <h2 class="text-3xl font-extrabold mb-1">Feedback untuk ${name}</h2>
+                            <p class="opacity-90 text-sm font-medium">Jawablah dengan jujur, ini untuk kebaikan bersama.</p>
+                        </div>
+                        <div class="absolute top-0 right-0 opacity-10 transform translate-x-4 -translate-y-4 text-9xl">
+                             ${isLambang ? '👨🏻' : '👩🏻'}
+                        </div>
+                    </div>
+                    
+                    <div class="p-6 md:p-8">
+                        <!-- Sensitive Toggle -->
+                        <div class="${lightColor} border border-transparent rounded-xl p-4 mb-8 flex items-start gap-3 transition-colors duration-300">
+                            <div class="flex items-center h-5 mt-1">
+                                <input type="checkbox" id="sensitiveToggle" class="w-5 h-5 rounded border-gray-300 text-${themeColor}-600 focus:ring-${themeColor}-500 transition duration-150 ease-in-out cursor-pointer" checked onchange="toggleSensitive(this)">
+                            </div>
+                            <div>
+                                <label for="sensitiveToggle" class="font-bold text-slate-800 cursor-pointer select-none text-sm md:text-base block">
+                                    Saya bersedia menjawab topik sensitif
+                                </label>
+                                <p class="text-xs text-slate-500 mt-1">Topik mencakup Keuangan, Gaya Hidup & Religiusitas (Opsional).</p>
+                            </div>
+                        </div>
+
+                        <form id="surveyForm" onsubmit="event.preventDefault(); saveStepData('${name}');">
+                            <div class="space-y-8">
+            `;
+
+            questions.forEach(q => {
+                const isSensitive = SURVEY_DATA.sensitive.some(sq => sq.id === q.id);
+                const fieldId = `${name.toLowerCase()}_${q.id}`;
+                const hiddenClass = isSensitive ? 'sensitive-field' : '';
+                const optionalLabel = q.optional ? '<span class="text-slate-400 font-normal ml-1 text-xs">(Optional)</span>' : '<span class="text-red-400 ml-1">*</span>';
+                
+                formHTML += `<div class="${hiddenClass} group">`;
+                formHTML += `<label class="block text-sm font-bold text-slate-700 mb-2 group-hover:text-slate-900 transition-colors">${q.label.replace('[NAMA]', name)} ${optionalLabel}</label>`;
+
+                if (q.type === 'select') {
+                    formHTML += `
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            ${q.options.map(opt => `
+                                <label class="cursor-pointer relative">
+                                    <input type="radio" name="${fieldId}" value="${opt}" class="peer sr-only" ${!q.optional ? 'required' : ''}>
+                                    <div class="bg-white rounded-lg border-2 border-slate-100 p-3 text-base font-medium text-slate-600 hover:bg-slate-50 peer-checked:bg-${isLambang?'indigo':'rose'}-50 peer-checked:border-${isLambang?'indigo':'rose'}-500 peer-checked:text-${isLambang?'indigo':'rose'}-700 transition-all text-center h-full flex items-center justify-center shadow-sm">
+                                        ${opt}
+                                    </div>
+                                </label>
+                            `).join('')}
+                        </div>
+                    `;
+                } else if (q.type === 'slider') {
+                    formHTML += `
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                            <div class="flex items-center gap-4 mb-2">
+                                <span class="text-xs font-bold text-slate-400">1</span>
+                                <input type="range" name="${fieldId}" min="${q.min}" max="${q.max}" step="1" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-${isLambang?'indigo':'rose'}-600">
+                                <span class="text-xs font-bold text-slate-400">5</span>
+                            </div>
+                            <div class="flex justify-between text-xs text-slate-400 font-medium px-1">
+                                <span>Kurang</span><span>Sangat</span>
+                            </div>
+                            ${q.note ? `<div class="text-[10px] text-slate-400 mt-2 text-center italic">${q.note}</div>` : ''}
+                        </div>
+                    `;
+                } else if (q.type === 'textarea') {
+                    formHTML += `<textarea name="${fieldId}" rows="3" class="w-full bg-white text-slate-900 rounded-lg border-slate-200 border-2 p-3 text-base focus:border-${isLambang?'indigo':'rose'}-500 focus:outline-none transition-colors resize-y shadow-sm" placeholder="Tulis jawabanmu disini..." ${!q.optional ? 'required' : ''}></textarea>`;
+                } else {
+                    formHTML += `<input type="text" name="${fieldId}" class="w-full bg-white text-slate-900 rounded-lg border-slate-200 border-2 p-3 text-base focus:border-${isLambang?'indigo':'rose'}-500 focus:outline-none transition-colors shadow-sm" placeholder="${q.placeholder || ''}" ${!q.optional ? 'required' : ''}>`;
+                }
+                formHTML += `</div>`;
+            });
+
+            formHTML += `
+                            </div>
+                            <div class="mt-10 pt-6 border-t border-slate-100 flex justify-end">
+                                <button type="submit" class="${headerColor} text-white px-8 py-3.5 rounded-xl font-bold hover:opacity-90 transition shadow-lg shadow-${isLambang?'indigo':'rose'}-200 flex items-center gap-2">
+                                    Lanjut <span class="text-lg">&rarr;</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+
+            app.innerHTML = formHTML;
+            window.scrollTo(0,0);
+        }
+
+        function renderFamilyForm() {
+             let formHTML = `
+                <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full overflow-hidden fade-in" style="animation-delay: 0s">
+                    <div class="bg-teal-600 p-8 text-white">
+                        <h2 class="text-3xl font-extrabold mb-1">Tentang Keluarga 👨‍👩‍👧</h2>
+                        <p class="text-teal-100 text-sm font-medium">Pandanganmu tentang kami sebagai pasangan & orang tua.</p>
+                    </div>
+                    <div class="p-6 md:p-8">
+                        <form id="familyForm" onsubmit="event.preventDefault(); saveStepData('family');">
+                            <div class="space-y-6">
+            `;
+            
+            SURVEY_DATA.family.forEach(q => {
+                formHTML += `
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-2">${q.label}</label>
+                        <textarea name="family_${q.id}" rows="3" class="w-full bg-white text-slate-900 rounded-lg border-slate-200 border-2 p-3 text-base focus:border-teal-500 focus:outline-none transition-colors resize-y shadow-sm" required placeholder="Tulis pandanganmu..."></textarea>
+                    </div>
+                `;
+            });
+
+            formHTML += `
+                            </div>
+                            <div class="mt-8 pt-6 border-t border-slate-100 flex justify-end">
+                                <button type="submit" class="bg-slate-900 text-white px-8 py-3.5 rounded-xl font-bold hover:bg-slate-800 transition shadow-xl flex items-center gap-2">
+                                    Selesai & Kirim <span class="text-lg">✨</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            app.innerHTML = formHTML;
+            window.scrollTo(0,0);
+        }
+
+        window.toggleSensitive = (checkbox) => {
+            const fields = document.querySelectorAll('.sensitive-field');
+            fields.forEach(f => {
+                if(checkbox.checked) {
+                    f.classList.remove('hidden');
+                    f.classList.add('fade-in');
+                } else {
+                    f.classList.add('hidden');
+                    f.classList.remove('fade-in');
+                }
+                
+                // Disable inputs if hidden so they don't block submit validation
+                const inputs = f.querySelectorAll('input, select, textarea');
+                inputs.forEach(i => i.disabled = !checkbox.checked);
+            });
+        };
+
+        window.saveStepData = (prefix) => {
+            const form = document.querySelector('form');
+            const formData = new FormData(form);
+            
+            for (let [key, value] of formData.entries()) {
+                state.answers[key] = value;
+            }
+            
+            renderNextStep();
+        };
+
+        // ================= SUBMISSION =================
+        async function submitData() {
+            app.innerHTML = `
+                <div class="text-center fade-in py-20">
+                    <div class="animate-spin rounded-full h-12 w-12 border-4 border-indigo-100 border-t-indigo-600 mx-auto mb-6"></div>
+                    <h2 class="text-xl font-bold text-slate-700">Menyimpan jawaban...</h2>
+                </div>
+            `;
+
+            // Infer respondent type from relationship data (Fallback logic)
+            let respondentType = state.answers['lambang_relation'] || state.answers['lonita_relation'] || 'Unknown';
+
+            const payload = {
+                target: state.target,
+                respondent_type: respondentType,
+                answers: state.answers
+            };
+
+            const { error } = await supabase.from('survey_responses').insert([payload]);
+
+            if (error) {
+                console.error(error);
+                alert('Gagal menyimpan. Cek koneksi internet atau Supabase Config.');
+                renderLanding();
+            } else {
+                app.innerHTML = `
+                    <div class="bg-white p-10 rounded-3xl shadow-2xl max-w-md w-full text-center fade-in border border-slate-100">
+                        <div class="text-7xl mb-6 animate-bounce">🎉</div>
+                        <h1 class="text-3xl font-extrabold text-slate-900 mb-3">Terima Kasih!</h1>
+                        <p class="text-slate-500 mb-8 leading-relaxed">Masukanmu sangat berarti bagi pertumbuhan keluarga kami di tahun 2025.</p>
+                        <button onclick="location.reload()" class="w-full bg-slate-50 text-indigo-600 font-bold py-3 rounded-xl hover:bg-indigo-50 border border-transparent hover:border-indigo-100 transition-all">
+                            Isi lagi untuk orang lain
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        // ================= AI LOGIC (INDIVIDUAL) =================
+        window.analyzeFeedback = async (person) => {
+            if (!ai) {
+                alert("AI Key is missing. Check configuration.");
+                return;
+            }
+
+            const stats = window.dashboardData[person];
+            const resultDiv = document.getElementById('ai-result');
+            const btn = document.getElementById('ai-btn');
+
+            if (stats.count === 0) {
+                alert("Belum ada cukup data untuk analisis AI.");
+                return;
+            }
+
+            // Update UI State
+            btn.disabled = true;
+            btn.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Sedang menganalisis...`;
+            
+            resultDiv.classList.remove('hidden');
+            resultDiv.innerHTML = '<p class="text-slate-500 italic">Gemini sedang membaca pikiran responden...</p>';
+
+            // Construct Prompt
+            const contextData = {
+                name: person,
+                total_responses: stats.count,
+                avg_scores: { depth: stats.avgDepth, professionalism: stats.avgProf },
+                dominant_traits: stats.topWords.slice(0, 10).map(x => x[0]),
+                problems: stats.problems,
+                feedback_samples: stats.feedback.slice(0, 15).map(f => ({
+                    relation: f.relation,
+                    stop: f.stop,
+                    start: f.start,
+                    continue: f.continue
+                })).filter(f => f.stop || f.start || f.continue)
+            };
+
+            const prompt = `
+                Bertindaklah sebagai psikolog dan konsultan pengembangan diri profesional.
+                Analisis data feedback 360 derajat untuk seseorang bernama ${person}.
+                
+                Data JSON:
+                ${JSON.stringify(contextData)}
+
+                Tugas:
+                Berikan ringkasan eksekutif (Executive Summary) yang empatik namun objektif dalam Bahasa Indonesia.
+                Format output dalam HTML sederhana (tanpa markdown code block) dengan struktur:
+                1. <h3>Kekuatan Utama (Superpower)</h3>: Highlight 2-3 sifat positif yang paling menonjol.
+                2. <h3>Blind Spot & Area Pengembangan</h3>: Analisis pola dari feedback 'STOP' dan 'START'. Apa yang orang lain lihat tapi mungkin ${person} tidak sadari?
+                3. <h3>Saran Aksi 2025</h3>: 3 langkah konkret untuk menjadi pribadi yang lebih baik tahun depan.
+                
+                Gunakan nada bicara yang suportif, hangat, tapi jujur dan langsung pada poinnya.
+            `;
+
+            try {
+                const response = await ai.models.generateContent({
+                    model: 'gemini-3-flash-preview',
+                    contents: prompt,
+                });
+
+                let htmlContent = response.text.replace(/```html/g, '').replace(/```/g, '');
+                resultDiv.innerHTML = `<div class="ai-content text-sm md:text-base text-slate-700">${htmlContent}</div>`;
+                
+                // Restore button state
+                btn.innerHTML = '✨ Analisis Ulang';
+                btn.disabled = false;
+
+            } catch (error) {
+                console.error("AI Error:", error);
+                resultDiv.innerHTML = `<p class="text-red-500">Maaf, terjadi kesalahan saat menghubungi AI. (${error.message})</p>`;
+                btn.disabled = false;
+                btn.innerHTML = '✨ Coba Lagi';
+            }
+        };
+
+        // ================= AI LOGIC (FAMILY / MARRIAGE) =================
+        window.analyzeFamilyFeedback = async () => {
+            if (!ai) { alert("AI Key is missing."); return; }
+
+            const lambangStats = window.dashboardData['lambang'];
+            const lonitaStats = window.dashboardData['lonita'];
+            const familyStats = window.dashboardData['family']; // Specifically family questions
+            const resultDiv = document.getElementById('ai-family-result');
+            const btn = document.getElementById('ai-family-btn');
+
+            if (lambangStats.count === 0 && lonitaStats.count === 0) {
+                alert("Belum ada data untuk analisis keluarga.");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Konseling AI berjalan...`;
+            
+            resultDiv.classList.remove('hidden');
+            resultDiv.innerHTML = '<p class="text-slate-500 italic">Menganalisis dinamika psikologis keluarga...</p>';
+
+            const contextData = {
+                husband: {
+                    name: 'Lambang',
+                    traits: lambangStats.topWords.slice(0, 10).map(x => x[0]),
+                    pressure_response: lambangStats.problems,
+                },
+                wife: {
+                    name: 'Lonita',
+                    traits: lonitaStats.topWords.slice(0, 10).map(x => x[0]),
+                    pressure_response: lonitaStats.problems,
+                },
+                family_perception: {
+                    vibes: familyStats.vibes,
+                    parenting: familyStats.parenting,
+                    wishes: familyStats.wishes
+                }
+            };
+
+            const prompt = `
+                Bertindaklah sebagai Psikolog Pernikahan dan Konsultan Keluarga Senior.
+                Saya memiliki data survei 360 derajat untuk pasangan Suami (Lambang) dan Istri (Lonita).
+                
+                Data JSON:
+                ${JSON.stringify(contextData)}
+
+                Tugas:
+                Berikan "Marriage & Family Audit" yang mendalam berdasarkan ilmu psikologi hubungan (misal: Gottman, Bahasa Kasih, dll).
+                Format output dalam HTML sederhana (tanpa markdown code block) dengan struktur:
+                
+                1. <h3>Dinamika Pasangan (The Couple Dance)</h3>: 
+                   Analisis bagaimana sifat Lambang dan Lonita berinteraksi. Apakah saling melengkapi atau ada potensi gesekan? (Lihat data 'traits' dan 'pressure_response').
+                
+                2. <h3>Persepsi Orang Lain (Family Brand)</h3>: 
+                   Rangkum bagaimana orang lain melihat "Vibes" mereka dan gaya "Parenting" mereka berdasarkan data feedback.
+                
+                3. <h3>Nasihat Pernikahan 2025 (Psychology-Based)</h3>: 
+                   Berikan 3 saran konkret, hangat, dan bisa diterapkan untuk memperkuat pernikahan dan keharmonisan rumah tangga mereka di tahun depan.
+                   Gunakan istilah psikologi populer jika relevan (misal: "Emotional Bank Account", "Active Listening", dll) namun jelaskan dengan bahasa awam yang menyentuh hati.
+
+                Nada bicara: Bijaksana, hangat, profesional, dan solutif.
+            `;
+
+            try {
+                const response = await ai.models.generateContent({
+                    model: 'gemini-3-flash-preview',
+                    contents: prompt,
+                });
+
+                let htmlContent = response.text.replace(/```html/g, '').replace(/```/g, '');
+                resultDiv.innerHTML = `<div class="ai-content text-sm md:text-base text-slate-700">${htmlContent}</div>`;
+                btn.innerHTML = '✨ Analisis Ulang';
+                btn.disabled = false;
+            } catch (error) {
+                console.error("AI Error:", error);
+                resultDiv.innerHTML = `<p class="text-red-500">Error: ${error.message}</p>`;
+                btn.disabled = false;
+                btn.innerHTML = '✨ Coba Lagi';
+            }
+        };
+
+
+        // ================= DASHBOARD LOGIC =================
+        async function renderDashboard() {
+            // Adjust layout for dashboard
+            app.classList.remove('flex', 'items-center', 'justify-center', 'max-w-2xl');
+            app.classList.add('w-full', 'max-w-7xl', 'mx-auto', 'pt-8', 'block');
+            document.body.classList.remove('bg-slate-50');
+            document.body.classList.add('bg-slate-100');
+
+            app.innerHTML = `
+                <div class="flex justify-center items-center h-64"><div class="animate-spin rounded-full h-12 w-12 border-4 border-slate-200 border-t-indigo-600"></div></div>
+            `;
+
+            // Fetch Data
+            const { data, error } = await supabase.from('survey_responses').select('*');
+            if (error) { 
+                alert('Fetch Error: ' + error.message); 
+                return; 
+            }
+
+            // Process Data
+            const lambangStats = processStats(data, 'lambang');
+            const lonitaStats = processStats(data, 'lonita');
+            
+            // Process Family Specific Data
+            const familyComments = { vibes: [], parenting: [], wishes: [] };
+            data.forEach(row => {
+                if(row.answers['family_couple_vibes']) familyComments.vibes.push(row.answers['family_couple_vibes']);
+                if(row.answers['family_parenting']) familyComments.parenting.push(row.answers['family_parenting']);
+                if(row.answers['family_wishes']) familyComments.wishes.push(row.answers['family_wishes']);
+            });
+
+            window.dashboardData = { 
+                lambang: lambangStats, 
+                lonita: lonitaStats,
+                family: familyComments
+            };
+
+            // Render Skeleton Layout
+            app.innerHTML = `
+                <div class="mb-8 flex flex-col md:flex-row md:justify-between md:items-end px-4 fade-in">
+                    <div>
+                        <h1 class="text-3xl font-extrabold text-slate-800 tracking-tight">Dashboard Refleksi 2024</h1>
+                        <p class="text-slate-500 mt-1">Summary feedback akhir tahun</p>
+                    </div>
+                    <div class="mt-4 md:mt-0 bg-white px-4 py-2 rounded-lg shadow-sm border border-slate-200">
+                        <span class="text-xs font-bold text-slate-400 uppercase mr-2">Total Responses</span>
+                        <span class="text-xl font-bold text-slate-800">${data.length}</span>
+                    </div>
+                </div>
+
+                <!-- Tabs -->
+                <div class="flex gap-1 bg-white p-1 rounded-xl mx-4 mb-6 w-fit shadow-sm border border-slate-200 overflow-x-auto">
+                    <button onclick="switchTab('lambang')" id="tab-btn-lambang" class="px-6 py-2 rounded-lg font-bold text-sm transition-all bg-indigo-600 text-white shadow-md">Lambang</button>
+                    <button onclick="switchTab('lonita')" id="tab-btn-lonita" class="px-6 py-2 rounded-lg font-bold text-sm text-slate-500 hover:bg-slate-50 transition-all">Lonita</button>
+                    <button onclick="switchTab('family')" id="tab-btn-family" class="px-6 py-2 rounded-lg font-bold text-sm text-slate-500 hover:bg-slate-50 transition-all whitespace-nowrap">Family Analysis 👨‍👩‍👧</button>
+                </div>
+
+                <!-- Content Area -->
+                <div id="dashboard-content" class="px-4 pb-20 fade-in"></div>
+            `;
+
+            renderDashboardTab('lambang');
+        }
+
+        function processStats(rawData, person) {
+            let count = 0;
+            let totalDepth = 0;
+            let totalProf = 0;
+            let profCount = 0;
+            
+            const responses = {
+                problems: {},
+                lifestyle: {},
+                words: [],
+                feedback: []
+            };
+
+            rawData.forEach(row => {
+                // If specific person or Family (contains both)
+                if (row.target.toLowerCase() === person || row.target === 'Family') {
+                    const ans = row.answers;
+                    
+                    // Filter check: Does this entry actually have data for this person?
+                    if(!ans[`${person}_relation`]) return;
+
+                    count++;
+                    totalDepth += parseInt(ans[`${person}_depth`] || 0);
+                    
+                    if(ans[`${person}_professionalism`]) {
+                        totalProf += parseInt(ans[`${person}_professionalism`]);
+                        profCount++;
+                    }
+
+                    // Count Distributions
+                    const probKey = ans[`${person}_response_pressure`];
+                    if(probKey) responses.problems[probKey] = (responses.problems[probKey] || 0) + 1;
+
+                    const lifeKey = ans[`${person}_lifestyle`];
+                    if(lifeKey) responses.lifestyle[lifeKey] = (responses.lifestyle[lifeKey] || 0) + 1;
+
+                    // Text Collection
+                    if(ans[`${person}_traits`]) responses.words.push(ans[`${person}_traits`]);
+                    
+                    // Feedback Object
+                    responses.feedback.push({
+                        relation: ans[`${person}_relation`],
+                        stop: ans[`${person}_traffic_stop`],
+                        start: ans[`${person}_traffic_start`],
+                        continue: ans[`${person}_traffic_continue`]
+                    });
+                }
+            });
+
+            // Process Word Cloud
+            const allWords = responses.words.join(' ').replace(/[,\.]/g, '').toLowerCase().split(/\s+/);
+            const wordCounts = {};
+            allWords.forEach(w => { 
+                if(w.length > 3) wordCounts[w] = (wordCounts[w] || 0) + 1; 
+            });
+            const sortedWords = Object.entries(wordCounts).sort((a,b) => b[1] - a[1]).slice(0, 15);
+
+            return {
+                count,
+                avgDepth: count ? (totalDepth / count).toFixed(1) : '0.0',
+                avgProf: profCount ? (totalProf / profCount).toFixed(1) : '0.0',
+                problems: responses.problems,
+                lifestyle: responses.lifestyle,
+                topWords: sortedWords,
+                feedback: responses.feedback
+            };
+        }
+
+        window.switchTab = (tabName) => {
+            // Reset all tabs
+            ['lambang', 'lonita', 'family'].forEach(t => {
+                const btn = document.getElementById(`tab-btn-${t}`);
+                if(btn) btn.className = 'px-6 py-2 rounded-lg font-bold text-sm text-slate-500 hover:bg-slate-50 transition-all whitespace-nowrap';
+            });
+
+            // Active Tab Style
+            const activeBtn = document.getElementById(`tab-btn-${tabName}`);
+            let colorClass = 'bg-indigo-600';
+            if (tabName === 'lonita') colorClass = 'bg-rose-500';
+            if (tabName === 'family') colorClass = 'bg-teal-600';
+
+            if(activeBtn) activeBtn.className = `px-6 py-2 rounded-lg font-bold text-sm transition-all ${colorClass} text-white shadow-md whitespace-nowrap`;
+
+            // Logic
+            if(tabName === 'family') {
+                renderFamilyDashboardTab();
+            } else {
+                renderDashboardTab(tabName);
+            }
+        };
+
+        window.renderFamilyDashboardTab = () => {
+            const familyData = window.dashboardData.family;
+            const content = document.getElementById('dashboard-content');
+            
+            // Build simple list helper
+            const listItems = (arr) => arr.length ? arr.map(t => `<div class="bg-slate-50 p-3 rounded-lg border border-slate-100 text-sm mb-2">"${t}"</div>`).join('') : '<div class="text-slate-400 text-sm italic">Belum ada data.</div>';
+
+            content.innerHTML = `
+                <!-- AI FAMILY ANALYSIS CARD -->
+                <div class="bg-gradient-to-r from-teal-600 to-emerald-600 rounded-2xl shadow-lg p-1 mb-8 text-white relative overflow-hidden fade-in">
+                    <div class="bg-white/95 backdrop-blur-sm rounded-xl p-6 md:p-8 text-slate-800">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
+                            <div>
+                                <h2 class="text-2xl font-bold flex items-center gap-2 text-transparent bg-clip-text bg-gradient-to-r from-teal-700 to-emerald-600">
+                                    <span class="text-2xl">👨‍👩‍👧</span> Family & Marriage Analysis
+                                </h2>
+                                <p class="text-sm text-slate-500">Analisis gabungan dan nasihat pernikahan berbasis psikologi.</p>
+                            </div>
+                            <button id="ai-family-btn" onclick="analyzeFamilyFeedback()" class="bg-slate-900 text-white px-5 py-2.5 rounded-lg font-semibold text-sm hover:bg-slate-700 transition shadow-lg flex items-center">
+                                ✨ Konseling AI
+                            </button>
+                        </div>
+                        <div id="ai-family-result" class="hidden mt-4 pt-4 border-t border-slate-100 min-h-[100px]">
+                            <!-- AI Content injected here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Manual Family Feedback Data -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 fade-in" style="animation-delay: 0.1s">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 max-h-[500px] flex flex-col">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                             <span class="w-2 h-6 bg-amber-400 rounded-full"></span>
+                             Couple Vibes
+                        </h3>
+                        <div class="overflow-y-auto scroller pr-2">
+                            ${listItems(familyData.vibes)}
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 max-h-[500px] flex flex-col">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                             <span class="w-2 h-6 bg-teal-500 rounded-full"></span>
+                             Parenting Style
+                        </h3>
+                        <div class="overflow-y-auto scroller pr-2">
+                             ${listItems(familyData.parenting)}
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 max-h-[500px] flex flex-col">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                             <span class="w-2 h-6 bg-rose-400 rounded-full"></span>
+                             Wishes / Harapan
+                        </h3>
+                        <div class="overflow-y-auto scroller pr-2">
+                             ${listItems(familyData.wishes)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDashboardTab(person) {
+            const stats = window.dashboardData[person];
+            const content = document.getElementById('dashboard-content');
+            
+            // Color theme
+            const color = person === 'lambang' ? 'text-indigo-600' : 'text-rose-600';
+            const gradientFrom = person === 'lambang' ? 'from-indigo-600' : 'from-rose-500';
+            const gradientTo = person === 'lambang' ? 'to-purple-600' : 'to-pink-600';
+
+            if (stats.count === 0) {
+                content.innerHTML = `
+                    <div class="text-center py-20 bg-white rounded-3xl shadow-sm border border-slate-200">
+                        <div class="text-6xl mb-4 grayscale opacity-30">📊</div>
+                        <h3 class="text-xl font-bold text-slate-400">Belum ada data untuk ${person}</h3>
+                    </div>`;
+                return;
+            }
+
+            content.innerHTML = `
+                <!-- AI SUMMARY CARD -->
+                <div class="bg-gradient-to-r ${gradientFrom} ${gradientTo} rounded-2xl shadow-lg p-1 mb-8 text-white relative overflow-hidden">
+                    <div class="bg-white/95 backdrop-blur-sm rounded-xl p-6 md:p-8 text-slate-800">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
+                            <h2 class="text-2xl font-bold flex items-center gap-2 text-transparent bg-clip-text bg-gradient-to-r ${gradientFrom} ${gradientTo}">
+                                <span class="text-2xl">✨</span> AI Executive Summary
+                            </h2>
+                            <button id="ai-btn" onclick="analyzeFeedback('${person}')" class="bg-slate-900 text-white px-5 py-2.5 rounded-lg font-semibold text-sm hover:bg-slate-700 transition shadow-lg flex items-center">
+                                ✨ Analisis Sekarang
+                            </button>
+                        </div>
+                        <div id="ai-result" class="hidden mt-4 pt-4 border-t border-slate-100 min-h-[100px]">
+                            <!-- AI Content will be injected here -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between h-32">
+                        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Total Responden</div>
+                        <div class="text-4xl font-extrabold text-slate-800">${stats.count}</div>
+                    </div>
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between h-32">
+                        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Avg. Kedalaman</div>
+                        <div class="text-4xl font-extrabold ${color}">${stats.avgDepth}<span class="text-lg text-slate-300 ml-1 font-medium">/5</span></div>
+                    </div>
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between h-32">
+                        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Avg. Profesionalisme</div>
+                        <div class="text-4xl font-extrabold text-emerald-600">${stats.avgProf}<span class="text-lg text-slate-300 ml-1 font-medium">/5</span></div>
+                    </div>
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between h-32">
+                        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Dominant Trait</div>
+                        <div class="text-2xl font-bold text-purple-600 capitalize truncate">${stats.topWords[0] ? stats.topWords[0][0] : '-'}</div>
+                        <div class="text-xs text-slate-400">${stats.topWords[0] ? stats.topWords[0][1] + ' mentions' : ''}</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <h3 class="font-bold text-slate-800 mb-6 flex items-center gap-2">
+                            <span class="w-2 h-6 bg-blue-500 rounded-full"></span>
+                            Respon Masalah
+                        </h3>
+                        <div class="h-64 relative">
+                            <canvas id="chartProblems"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <h3 class="font-bold text-slate-800 mb-6 flex items-center gap-2">
+                             <span class="w-2 h-6 bg-pink-500 rounded-full"></span>
+                            Persepsi Gaya Hidup
+                        </h3>
+                        <div class="h-64 relative">
+                             <canvas id="chartLifestyle"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- WORD CLOUD LIST -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 h-[500px] flex flex-col">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                             <span class="w-2 h-6 bg-purple-500 rounded-full"></span>
+                             Kata Sifat Populer
+                        </h3>
+                        <div class="flex flex-wrap gap-2 overflow-y-auto scroller content-start">
+                            ${stats.topWords.map(([word, count], i) => `
+                                <span class="px-3 py-1.5 rounded-lg ${i < 3 ? 'bg-purple-100 text-purple-800 font-bold border border-purple-200' : 'bg-slate-50 text-slate-600 border border-slate-100'} text-sm flex items-center gap-2">
+                                    ${word} <span class="text-xs opacity-60 bg-white px-1.5 rounded-md">${count}</span>
+                                </span>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <!-- FEEDBACK FEED -->
+                    <div class="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 h-[500px] flex flex-col">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                             <span class="w-2 h-6 bg-orange-500 rounded-full"></span>
+                             Traffic Light Feedback
+                        </h3>
+                        <div class="space-y-4 overflow-y-auto scroller pr-2">
+                            ${stats.feedback.map(f => {
+                                if(!f.start && !f.stop && !f.continue) return '';
+                                return `
+                                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                    <div class="text-xs font-bold text-slate-400 mb-3 uppercase tracking-wide flex items-center gap-2">
+                                        <div class="w-2 h-2 rounded-full bg-slate-300"></div>    
+                                        ${f.relation}
+                                    </div>
+                                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                                        ${f.stop ? `<div class="bg-white p-3 rounded-lg border-l-4 border-red-500 shadow-sm text-slate-700"><div class="font-bold text-red-500 text-xs mb-1">🛑 STOP</div>${f.stop}</div>` : ''}
+                                        ${f.start ? `<div class="bg-white p-3 rounded-lg border-l-4 border-emerald-500 shadow-sm text-slate-700"><div class="font-bold text-emerald-500 text-xs mb-1">🟢 START</div>${f.start}</div>` : ''}
+                                        ${f.continue ? `<div class="bg-white p-3 rounded-lg border-l-4 border-amber-400 shadow-sm text-slate-700"><div class="font-bold text-amber-500 text-xs mb-1">🟡 CONTINUE</div>${f.continue}</div>` : ''}
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Initialize Charts
+            if(Chart.getChart("chartProblems")) Chart.getChart("chartProblems").destroy();
+            if(Chart.getChart("chartLifestyle")) Chart.getChart("chartLifestyle").destroy();
+
+            // Default Chart Config
+            const chartOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { usePointStyle: true, boxWidth: 6 } } } };
+
+            new Chart(document.getElementById('chartProblems'), {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(stats.problems),
+                    datasets: [{ 
+                        data: Object.values(stats.problems), 
+                        backgroundColor: ['#3b82f6', '#ef4444', '#f59e0b', '#10b981'],
+                        borderWidth: 0
+                    }]
+                },
+                options: chartOptions
+            });
+
+            new Chart(document.getElementById('chartLifestyle'), {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(stats.lifestyle),
+                    datasets: [{ 
+                        data: Object.values(stats.lifestyle), 
+                        backgroundColor: ['#6366f1', '#ec4899', '#8b5cf6'],
+                        borderWidth: 0 
+                    }]
+                },
+                options: chartOptions
+            });
+        }
+    </script>
+</body>
+</html>

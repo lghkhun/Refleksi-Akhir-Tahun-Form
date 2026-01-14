@@ -1,0 +1,1 @@
+// This file is intentionally left empty as the application logic has been moved to index.html for a Vanilla JS implementation.
